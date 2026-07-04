@@ -30,6 +30,13 @@ emp_length_mapping = {
 
 df["emp_length"] = df["emp_length"].map(emp_length_mapping)
 
+loan_status_mapping = {
+    "Charged Off": 1,   # Positive class (default)
+    "Fully Paid": 0     # Negative class
+}
+
+df["loan_status"] = df["loan_status"].map(loan_status_mapping)
+
 print(df["emp_length"].head())
 categorical_columns = [
     "sub_grade",
@@ -60,4 +67,3 @@ FEATURE_PATH = PROJECT_ROOT / "data" / "processed" / "feature_engineered_data.cs
 df.to_csv(FEATURE_PATH, index=False)
 
 print("Feature engineered dataset saved successfully!")
-print(df.columns.value_counts())
