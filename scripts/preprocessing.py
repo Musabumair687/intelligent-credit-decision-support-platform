@@ -6,7 +6,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_PATH = PROJECT_ROOT / "data" / "raw" / "loan_dataset.csv"
 df = pd.read_csv(DATA_PATH)
 
-df = df.drop(["loan_status","installment","sub_grade","emp_title","issue_d","title","address"], axis=1)
+df = df.drop(["installment","grade","emp_title","issue_d","title","address"], axis=1)
 print(df.columns)
 
 
