@@ -1,31 +1,31 @@
 """
 embedding.py
 
-Purpose:
---------
-Initialize and provide the embedding model used by the RAG pipeline.
-
-The embedding model converts text into vector representations
-that ChromaDB can use for semantic similarity search.
+Creates the Gemini Embedding Model.
 """
 
-from langchain_ollama import OllamaEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+
+from rag.config import (
+    GOOGLE_API_KEY,
+    EMBEDDING_MODEL,
+)
 
 
 class EmbeddingModel:
     """
-    Creates and provides the embedding model.
+    Creates and returns the Gemini embedding model.
     """
 
     def __init__(self):
-        self.embedding_model = OllamaEmbeddings(
-            model="nomic-embed-text"
+
+        self.embedding_model = GoogleGenerativeAIEmbeddings(
+            model=EMBEDDING_MODEL,
+            google_api_key=GOOGLE_API_KEY,
         )
 
     def get_embedding_model(self):
-        """
-        Return the initialized embedding model.
-        """
+
         return self.embedding_model
 
 
@@ -33,15 +33,13 @@ if __name__ == "__main__":
 
     model = EmbeddingModel().get_embedding_model()
 
-    embedding = model.embed_query(
-        "A customer with a high credit score is eligible for a premium loan."
+    vector = model.embed_query(
+        "Customer with high salary gets premium loan."
     )
 
     print("=" * 60)
-    print(f"Embedding Dimension : {len(embedding)}")
+    print("Embedding Dimension:", len(vector))
     print("=" * 60)
-
-    print("\nFirst 10 Values:\n")
-    print(embedding[:10])
+    print(vector[:10])
 
     

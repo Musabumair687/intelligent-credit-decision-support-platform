@@ -1,15 +1,16 @@
-# Document Processing
-CHUNK_SIZE = 1000
-CHUNK_OVERLAP = 200
+from pathlib import Path
+from dotenv import load_dotenv
+import os
 
-# Embedding Model
-EMBEDDING_MODEL = "nomic-embed-text"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(PROJECT_ROOT / ".env", override=True)
 
-# ChromaDB
-COLLECTION_NAME = "credit_policy"
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+LLM_MODEL = os.getenv("LLM_MODEL")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL")
 
-# Retriever
-TOP_K = 5
-
-# Gemini
-LLM_MODEL = "gemini-2.5-flash"
+if __name__ == "__main__":
+    print("PROJECT_ROOT:", PROJECT_ROOT)
+    print("GOOGLE_API_KEY:", GOOGLE_API_KEY)
+    print("LLM_MODEL:", LLM_MODEL)
+    print("EMBEDDING_MODEL:", EMBEDDING_MODEL)
