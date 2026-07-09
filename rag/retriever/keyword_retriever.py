@@ -1,3 +1,4 @@
+print("Running keyword_retriever.py")
 """
 keyword_retriever.py
 
@@ -81,10 +82,10 @@ class KeywordRetriever:
 
     # -------------------------------------------------
 
-    def keyword_search(
+    def search(
         self,
         query: str,
-        k: int = 5,
+        k: int = 30,
     ):
         """
         Perform keyword search.
@@ -117,9 +118,9 @@ if __name__ == "__main__":
 
     query = "premium loan interest rate"
 
-    documents = retriever.keyword_search(
+    documents = retriever.search(
         query=query,
-        k=5,
+        k=30,
     )
 
     print("=" * 60)

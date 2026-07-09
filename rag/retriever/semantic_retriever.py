@@ -1,5 +1,5 @@
 print("Running semantic_retriever.py")
-print(__file__)
+
 """
 semantic_retriever.py
 
@@ -77,7 +77,7 @@ class SemanticRetriever:
     def similarity_search(
         self,
         query: str,
-        k: int = 5,
+        k: int = 30,
     ):
         """
         Perform semantic similarity search.
@@ -105,7 +105,7 @@ class SemanticRetriever:
     def similarity_search_with_score(
         self,
         query: str,
-        k: int = 5,
+        k: int = 30,
     ):
         """
         Perform semantic search with similarity score.
@@ -127,7 +127,7 @@ class SemanticRetriever:
     def mmr_search(
         self,
         query: str,
-        k: int = 5,
+        k: int = 30,
         fetch_k: int = 20,
     ):
         """
@@ -148,7 +148,7 @@ class SemanticRetriever:
     def as_retriever(
         self,
         search_type="similarity",
-        k: int = 5,
+        k: int = 30,
     ):
         """
         Return LangChain Retriever object.
@@ -239,7 +239,7 @@ if __name__ == "__main__":
         print(f"\nDocument {i}")
         print(doc.page_content[:300])
         print(doc.metadata)
-print("\nFinished Test 4")
+    print("\nFinished Test 4")
 
 
         
