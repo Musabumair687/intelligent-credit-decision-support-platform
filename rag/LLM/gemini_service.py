@@ -57,7 +57,7 @@ class GeminiService:
 
         genai.configure(api_key=api_key)
 
-        self.model = genai.GenerativeModel(model_name)
+        self.model = genai.GenerativeModel(model_name="gemini-flash-latest")
 
     def generate(
         self,

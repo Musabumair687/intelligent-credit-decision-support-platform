@@ -1,22 +1,25 @@
-print("Running keyword_retriever.py")
 """
 keyword_retriever.py
 
 Purpose
 -------
-This module provides keyword-based retrieval using the
-BM25 ranking algorithm.
+Performs keyword-based retrieval using the BM25 algorithm.
 
-Unlike semantic search, BM25 retrieves documents based
-on exact keyword matching.
+Instead of loading and chunking PDF documents every time,
+this module loads the pre-built chunk store (chunks.pkl).
 
 Workflow
 --------
-1. Load PDF documents
-2. Split documents into chunks
-3. Build BM25 index
-4. Perform keyword search
-5. Return relevant document chunks
+Load chunks.pkl
+      │
+      ▼
+Build BM25 Index
+      │
+      ▼
+Keyword Search
+      │
+      ▼
+Return Relevant Chunks
 
 Author
 ------
@@ -27,14 +30,10 @@ Intelligent Credit Decision Support Platform
 # Imports
 # ---------------------------------------------------------
 
+import pickle
+from pathlib import Path
+
 from langchain_community.retrievers import BM25Retriever
-
-from rag.documents.document_loader import DocumentLoader
-from rag.documents.text_splitter import DocumentSplitter
-
-from rag.config import (
-    DOCUMENT_PATH,
-)
 
 
 class KeywordRetriever:
@@ -48,33 +47,36 @@ class KeywordRetriever:
 
         Steps
         -----
-        1. Load documents
-        2. Split into chunks
-        3. Build BM25 index
+        1. Load chunk store
+        2. Build BM25 Index
         """
 
-        # ---------------------------------------------
-        # Load PDF documents
-        # ---------------------------------------------
+        # -------------------------------------------------
+        # Locate chunk file
+        # -------------------------------------------------
 
-        loader = DocumentLoader(DOCUMENT_PATH)
+        BASE_DIR = Path(__file__).resolve().parents[2]
 
-        documents = loader.load_all_pdfs()
+        chunk_file = (
+            BASE_DIR
+            / "docs"
+            / "chunks"
+            / "chunks.pkl"
+        )
 
-        # ---------------------------------------------
-        # Split documents
-        # ---------------------------------------------
+        # -------------------------------------------------
+        # Load chunks
+        # -------------------------------------------------
 
-        splitter = DocumentSplitter()
+        with open(chunk_file, "rb") as file:
 
-        chunks = splitter.split_documents(documents)
+            self.documents = pickle.load(file)
 
-        # Save chunks (optional but useful later)
-        self.documents = chunks
+        print(f"Loaded {len(self.documents)} chunks.")
 
-        # ---------------------------------------------
+        # -------------------------------------------------
         # Build BM25 Retriever
-        # ---------------------------------------------
+        # -------------------------------------------------
 
         self.retriever = BM25Retriever.from_documents(
             self.documents
@@ -88,7 +90,7 @@ class KeywordRetriever:
         k: int = 30,
     ):
         """
-        Perform keyword search.
+        Perform BM25 keyword search.
 
         Parameters
         ----------
@@ -123,16 +125,16 @@ if __name__ == "__main__":
         k=30,
     )
 
-    print("=" * 60)
+    print("=" * 70)
     print("BM25 KEYWORD SEARCH")
-    print("=" * 60)
+    print("=" * 70)
 
     for i, doc in enumerate(documents, start=1):
 
         print(f"\nDocument {i}")
-        print("-" * 60)
+        print("-" * 70)
 
-        print(doc.page_content[:400])
+        print(doc.page_content[:500])
 
         print("\nMetadata")
 

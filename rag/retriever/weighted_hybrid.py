@@ -64,8 +64,8 @@ class WeightedHybridRetriever:
         query: str,
         semantic_weight: float = 0.7,
         keyword_weight: float = 0.3,
-        semantic_k: int = 5,
-        keyword_k: int = 5,
+        semantic_k: int = 30,
+        keyword_k: int = 30,
     ):
         """
         Perform weighted hybrid retrieval.

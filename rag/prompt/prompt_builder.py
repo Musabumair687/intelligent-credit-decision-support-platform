@@ -38,7 +38,7 @@ Rules:
 
     def build_prompt(
         self,
-        question: str,
+        query: str,
         documents: list,
     ) -> str:
         """
@@ -89,9 +89,9 @@ BANKING POLICY CONTEXT
 
 =================================================
 
-QUESTION
+QUERY
 
-{question}
+{query}
 
 =================================================
 
