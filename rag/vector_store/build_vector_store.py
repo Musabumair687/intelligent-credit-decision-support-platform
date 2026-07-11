@@ -23,7 +23,7 @@ from pathlib import Path
 from rag.documents.document_loader import DocumentLoader
 from rag.documents.text_splitter import DocumentSplitter
 from rag.embeddings.embedding import EmbeddingModel
-from rag.vector_db.vector_store import VectorStoreManager
+from rag.vector_store.vector_store import VectorStoreManager
 
 
 # ------------------------------------------------------------------

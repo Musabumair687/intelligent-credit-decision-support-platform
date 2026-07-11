@@ -1,4 +1,4 @@
-print("Running semantic_retriever.py")
+
 
 """
 semantic_retriever.py
@@ -45,32 +45,24 @@ from rag.config import (
 
 
 class SemanticRetriever:
-    """
-    Performs semantic search on the Chroma Vector Database.
-    """
+
+    _vector_store = None
 
     def __init__(self):
-        """
-        Initialize the semantic retriever.
 
-        Steps
-        -----
-        1. Load embedding model
-        2. Load vector database
-        """
+        if SemanticRetriever._vector_store is None:
 
-        # Create embedding model
-        self.embedding_model = EmbeddingModel().get_embedding_model()
+            embedding = EmbeddingModel().get_embedding_model()
 
-        # Create vector store manager
-        self.vector_store_manager = VectorStoreManager(
-            persist_directory=VECTOR_DB_PATH,
-            collection_name=COLLECTION_NAME,
-            embedding_model=self.embedding_model,
-        )
+            manager = VectorStoreManager(
+                persist_directory=VECTOR_DB_PATH,
+                collection_name=COLLECTION_NAME,
+                embedding_model=embedding
+            )
 
-        # Load existing Chroma database
-        self.vector_store = self.vector_store_manager.load_vector_store()
+            SemanticRetriever._vector_store = manager.load_vector_store()
+
+        self.vector_store = SemanticRetriever._vector_store
 
     # -----------------------------------------------------
 

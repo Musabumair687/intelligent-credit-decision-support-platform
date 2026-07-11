@@ -3,89 +3,128 @@ gemini_service.py
 
 Purpose
 -------
-Handles all communication with the Gemini API.
+Handles all communication with the Groq API.
 
-Responsibilities
-----------------
-1. Load Gemini model.
-2. Send prompt to Gemini.
-3. Return generated response.
+Gemini is used only for embeddings.
 
-This class knows NOTHING about:
-- RAG
-- Retriever
-- ChromaDB
-- BM25
-- Cross Encoder
-- Prompt Builder
+This service is responsible only for text generation.
 
-It only receives a prompt and returns an answer.
+Author
+------
+Intelligent Credit Decision Support Platform
 """
 
-import os
+from openai import OpenAI
 
-import google.generativeai as genai
-
-from dotenv import load_dotenv
-
-
-load_dotenv()
+from rag.config import (
+    GROQ_API_KEY,
+    LLM_MODEL,
+)
 
 
 class GeminiService:
     """
-    Wrapper around Google's Gemini model.
+    Wrapper around the Groq API.
+
+    The class name remains GeminiService so the
+    existing project imports do not need to change.
     """
 
-    def __init__(
-        self,
-        model_name: str = "gemini-2.5-flash",
-    ):
+    def __init__(self):
         """
-        Initialize Gemini.
-
-        Parameters
-        ----------
-        model_name : str
-            Gemini model name.
+        Initialize the Groq client.
         """
 
-        api_key = os.getenv("GOOGLE_API_KEY")
+        if not GROQ_API_KEY:
+            raise ValueError(
+                "GROQ_API_KEY not found in config.py"
+            )
 
-        if not api_key:
-            raise ValueError("GOOGLE_API_KEY not found.")
+        self.client = OpenAI(
+            api_key=GROQ_API_KEY,
+            base_url="https://api.groq.com/openai/v1",
+        )
 
-        genai.configure(api_key=api_key)
-
-        self.model = genai.GenerativeModel(model_name="gemini-flash-latest")
+    # ---------------------------------------------------------
 
     def generate(
         self,
         prompt: str,
     ) -> str:
         """
-        Generate response from Gemini.
-
-        Parameters
-        ----------
-        prompt : str
-
-        Returns
-        -------
-        str
+        Generate a response from Groq.
         """
 
-        response = self.model.generate_content(prompt)
+        try:
 
-        return response.text.strip()
+            response = self.client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+                temperature=0.2,
+            )
 
+            return response.choices[0].message.content.strip()
+
+        except Exception as e:
+
+            return f"Groq API Error: {e}"
+
+    # ---------------------------------------------------------
+
+    def generate_stream(
+        self,
+        prompt: str,
+    ):
+        """
+        Stream Groq responses.
+        """
+
+        try:
+
+            stream = self.client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    }
+                ],
+                temperature=0.2,
+                stream=True,
+            )
+
+            for chunk in stream:
+
+                if (
+                    chunk.choices
+                    and chunk.choices[0].delta.content
+                ):
+                    yield chunk.choices[0].delta.content
+
+        except Exception as e:
+
+            yield f"Groq API Error: {e}"
+
+
+# ---------------------------------------------------------
+# Testing
+# ---------------------------------------------------------
 
 if __name__ == "__main__":
+
+    print("=" * 80)
+    print("Groq Model :", LLM_MODEL)
+    print("=" * 80)
 
     llm = GeminiService()
 
     prompt = """
-You are an AI assistant.
+You are an AI Banking Assistant.
 
 Question:
 What is Debt-to-Income Ratio?
@@ -93,7 +132,7 @@ What is Debt-to-Income Ratio?
 
     answer = llm.generate(prompt)
 
-    print("=" * 80)
-    print("GEMINI RESPONSE")
+    print("\n" + "=" * 80)
+    print("GROQ RESPONSE")
     print("=" * 80)
     print(answer)
