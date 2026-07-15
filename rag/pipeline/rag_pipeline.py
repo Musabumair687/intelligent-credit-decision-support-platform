@@ -97,7 +97,7 @@ if __name__ == "__main__":
 
     pipeline = RAGPipeline()
 
-    query = "What are the quarterly reporting obligations of the Chief Compliance Officer, and which internal function has the authority to review policy exception files and escalate deficiencies to the Chief Risk Officer??"
+    query = "What is minimum threshold and what about B5 and G4 subgrade "
 
     result = pipeline.run(query)
 
