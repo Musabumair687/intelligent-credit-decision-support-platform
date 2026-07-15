@@ -97,7 +97,7 @@ if __name__ == "__main__":
 
     pipeline = RAGPipeline()
 
-    query = "What is minimum threshold and what about B5 and G4 subgrade "
+    query = "Debt-to-Income Ratio policy Maximum DTI Borrower indebtedness "
 
     result = pipeline.run(query)
 
