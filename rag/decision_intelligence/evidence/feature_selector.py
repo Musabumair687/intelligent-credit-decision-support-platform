@@ -4,7 +4,7 @@ feature_selector.py
 Purpose
 -------
 Selects the most important features from the SHAP
-explanation after a loan prediction.
+Explanation returned by the Prediction Service.
 
 The selected features are passed to the Query Generator
 to create policy-aware retrieval queries.
@@ -16,7 +16,11 @@ Author
 Intelligent Credit Decision Support Platform
 """
 
-from typing import Dict, List
+from typing import List, Dict
+
+import numpy as np
+
+import shap
 
 
 class FeatureSelector:
@@ -46,38 +50,17 @@ class FeatureSelector:
 
     def select(
         self,
-        applicant: Dict,
-        shap_values: Dict[str, float],
+        shap_explanation: shap.Explanation,
     ) -> List[Dict]:
         """
-        Select the top SHAP features.
+        Select the most important SHAP features.
 
         Parameters
         ----------
-        applicant : Dict
+        shap_explanation : shap.Explanation
 
-            Applicant information.
-
-        Example
-
-        {
-            "annual_income": 50000,
-            "dti": 41,
-            "grade": "B3",
-            "loan_amount": 25000
-        }
-
-        shap_values : Dict[str, float]
-
-            SHAP explanation.
-
-        Example
-
-        {
-            "annual_income": -0.28,
-            "dti": 0.44,
-            "grade": 0.17
-        }
+            SHAP Explanation object returned by
+            PredictionService.
 
         Returns
         -------
@@ -87,40 +70,44 @@ class FeatureSelector:
 
         [
             {
-                "feature": "dti",
-                "value": 41,
-                "importance": 0.44
-            },
-            ...
+                "feature": "annual_inc",
+                "value": 71000,
+                "shap": -0.38,
+                "importance": 0.38
+            }
         ]
         """
 
-        if not shap_values:
+        if shap_explanation is None:
 
             return []
 
-        ranked_features = sorted(
+        shap_values = np.array(shap_explanation.values)
 
-            shap_values.items(),
-
-            key=lambda item: abs(item[1]),
-
-            reverse=True,
-
-        )
+        ranked_indices = np.argsort(
+            np.abs(shap_values)
+        )[::-1]
 
         selected_features = []
 
-        for feature, importance in ranked_features[: self.top_k]:
+        for index in ranked_indices[: self.top_k]:
 
             selected_features.append(
 
                 {
-                    "feature": feature,
 
-                    "value": applicant.get(feature),
+                    "feature":
+                        shap_explanation.feature_names[index],
 
-                    "importance": importance,
+                    "value":
+                        shap_explanation.data.iloc[index],
+
+                    "shap":
+                        float(shap_values[index]),
+
+                    "importance":
+                        float(abs(shap_values[index])),
+
                 }
 
             )
@@ -134,45 +121,45 @@ class FeatureSelector:
 
 if __name__ == "__main__":
 
-    applicant = {
+    import pandas as pd
 
-        "loan_amount": 25000,
+    explanation = shap.Explanation(
 
-        "annual_income": 50000,
+        values=np.array(
+            [
+                -0.43,
+                0.15,
+                -0.28,
+                0.07,
+                0.02,
+            ]
+        ),
 
-        "dti": 41,
+        data=pd.Series(
+            [
+                71000,
+                12,
+                "B3",
+                12000,
+                13.33,
+            ]
+        ),
 
-        "grade": "B3",
+        feature_names=[
+            "annual_inc",
+            "dti",
+            "sub_grade",
+            "loan_amnt",
+            "int_rate",
+        ],
 
-        "interest_rate": 12.7,
-
-        "employment_length": 5,
-
-    }
-
-    shap_values = {
-
-        "dti": 0.44,
-
-        "annual_income": -0.28,
-
-        "grade": 0.17,
-
-        "interest_rate": 0.12,
-
-        "loan_amount": 0.05,
-
-        "employment_length": 0.03,
-
-    }
+    )
 
     selector = FeatureSelector()
 
     features = selector.select(
 
-        applicant=applicant,
-
-        shap_values=shap_values,
+        shap_explanation=explanation,
 
     )
 
@@ -189,5 +176,7 @@ if __name__ == "__main__":
         print(f"Feature     : {item['feature']}")
 
         print(f"Value       : {item['value']}")
+
+        print(f"SHAP        : {item['shap']:.4f}")
 
         print(f"Importance  : {item['importance']:.4f}")

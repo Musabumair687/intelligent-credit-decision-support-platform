@@ -65,17 +65,13 @@ class EvidenceBuilder:
             Evidence object.
         """
 
-        applicant = context["applicant"]
-
-        shap_values = context["shap_values"]
+        
 
         top_features = self.feature_selector.select(
 
-            applicant=applicant,
+        context["shap_explanation"]
 
-            shap_values=shap_values,
-
-        )
+    )
 
         retrieval_query = self.query_generator.generate(
 

@@ -24,39 +24,52 @@ Intelligent Credit Decision Support Platform
 from typing import List
 
 
-def build_general_prompt(
-    query: str,
-    retrieved_documents: List[str],
-):
+class GeneralPrompt:
     """
-    Build the General RAG prompt.
-
-    Parameters
-    ----------
-    query : str
-
-    retrieved_documents : List[str]
-
-    Returns
-    -------
-    str
-        Prompt sent to the LLM.
+    Builds the prompt for general banking knowledge questions.
+    
+    This prompt is used when the user asks questions about
+    bank policies, loan policies, regulations, compliance,
+    credit risk, or any information stored in the RAG knowledge base.
+    
+    This prompt DOES NOT use prediction results or simulation context.
     """
 
-    documents = ""
+    def build(
+        self,
+        query: str,
+        retrieved_documents: List[str],
+    ) -> str:
+        """
+        Build the General RAG prompt.
 
-    for index, document in enumerate(
-        retrieved_documents,
-        start=1,
-    ):
+        Parameters
+        ----------
+        query : str
+            The user's question.
+        retrieved_documents : List[str]
+            List of retrieved document chunks.
 
-        documents += (
-            f"\nDocument {index}\n"
-            f"{'-'*60}\n"
-            f"{document}\n"
-        )
+        Returns
+        -------
+        str
+            Prompt sent to the LLM.
+        """
 
-    prompt = f"""
+        documents = ""
+
+        for index, document in enumerate(
+            retrieved_documents,
+            start=1,
+        ):
+
+            documents += (
+                f"\nDocument {index}\n"
+                f"{'-'*60}\n"
+                f"{document}\n"
+            )
+
+        prompt = f"""
 You are an experienced AI Banking Assistant
 working for Stratum Capital Bank.
 
@@ -106,7 +119,7 @@ User Question
 Answer
 """
 
-    return prompt
+        return prompt
 
 
 # ---------------------------------------------------------
@@ -125,7 +138,9 @@ if __name__ == "__main__":
 
     ]
 
-    prompt = build_general_prompt(
+    prompt_builder = GeneralPrompt()
+
+    prompt = prompt_builder.build(
 
         query="What is the DTI policy?",
 
