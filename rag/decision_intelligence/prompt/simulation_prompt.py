@@ -3,20 +3,17 @@ simulation_prompt.py
 
 Purpose
 -------
-Builds the final prompt used for explaining
-"What-If" simulations.
+Builds the prompt used to explain
+What-If simulations.
 
-Unlike DecisionPrompt,
-this prompt explains how modifying
-applicant features changes the ML prediction.
+This module never:
 
-This module NEVER:
-
-- Calls the LLM
+- Runs the ML model
 - Performs retrieval
-- Makes predictions
+- Calls the LLM
 
-It ONLY builds the prompt.
+It only converts structured simulation
+results into a professional prompt.
 
 Author
 ------
@@ -26,8 +23,125 @@ Intelligent Credit Decision Support Platform
 
 class SimulationPrompt:
     """
-    Builds prompts for simulation explanations.
+    Builds prompts for What-If simulation
+    explanations.
     """
+
+    def __init__(self):
+        """
+        Initialize prompt builder.
+        """
+        pass
+
+    # =====================================================
+    # Helper Functions
+    # =====================================================
+
+    def _build_applicant_summary(
+        self,
+        applicant_summary: dict,
+    ) -> str:
+        """
+        Convert applicant summary into text.
+        """
+
+        return f"""
+Loan Amount            : {applicant_summary.get("loan_amount")}
+Interest Rate          : {applicant_summary.get("interest_rate")}
+Term                   : {applicant_summary.get("term")}
+Sub Grade              : {applicant_summary.get("sub_grade")}
+Purpose                : {applicant_summary.get("purpose")}
+Annual Income          : {applicant_summary.get("annual_income")}
+Debt-to-Income Ratio   : {applicant_summary.get("dti")}
+"""
+
+    # -----------------------------------------------------
+
+    def _build_changes(
+        self,
+        changes: dict,
+    ) -> str:
+        """
+        Build feature modification section.
+        """
+
+        if not changes:
+
+            return "No applicant features were modified."
+
+        text = ""
+
+        for feature, values in changes.items():
+
+            text += f"""
+Feature
+
+{feature}
+
+Old Value
+
+{values.get("old")}
+
+New Value
+
+{values.get("new")}
+
+Direction
+
+{values.get("direction")}
+
+Percentage Change
+
+{values.get("percentage_change")}
+
+----------------------------------------
+"""
+
+        return text
+
+    # -----------------------------------------------------
+
+    def _build_shap_section(
+        self,
+        shap_comparison: dict,
+    ) -> str:
+        """
+        Build SHAP comparison section.
+        """
+
+        original = shap_comparison.get(
+
+            "original_top_features",
+
+            [],
+
+        )
+
+        simulation = shap_comparison.get(
+
+            "simulation_top_features",
+
+            [],
+
+        )
+
+        text = "Original Important Features\n\n"
+
+        for feature in original:
+
+            text += f"- {feature}\n"
+
+        text += "\n"
+
+        text += "Simulation Important Features\n\n"
+
+        for feature in simulation:
+
+            text += f"- {feature}\n"
+
+        return text
+
+    # -----------------------------------------------------
 
     def build_prompt(
         self,
@@ -35,181 +149,221 @@ class SimulationPrompt:
         simulation_result: dict,
     ) -> str:
         """
-        Build the simulation prompt.
-
-        Parameters
-        ----------
-        user_question : str
-
-        simulation_result : dict
-
-        Returns
-        -------
-        str
+        Build complete simulation prompt.
         """
 
-        original = simulation_result.get("original", {})
-        simulation = simulation_result.get("simulation", {})
-        changes = simulation_result.get("changes", {})
-        comparison = simulation_result.get("comparison", {})
+        original = simulation_result.get(
 
-        # --------------------------------------------------
-        # Build Changed Features Section
-        # --------------------------------------------------
+            "original",
 
-        change_text = ""
+            {},
 
-        if changes:
+        )
 
-            for feature, values in changes.items():
+        simulation = simulation_result.get(
 
-                change_text += (
-                    f"- {feature}: "
-                    f"{values.get('old')} "
-                    f"→ "
-                    f"{values.get('new')}\n"
-                )
+            "simulation",
 
-        else:
+            {},
 
-            change_text = "No applicant features were modified.\n"
+        )
 
-        # --------------------------------------------------
-        # Build Original SHAP Section
-        # --------------------------------------------------
+        comparison = simulation_result.get(
 
-        original_shap = ""
+            "comparison",
 
-        for feature in original.get("top_features", []):
+            {},
 
-            original_shap += f"- {feature}\n"
+        )
 
-        if not original_shap:
+        applicant_summary = simulation_result.get(
 
-            original_shap = "No SHAP features available.\n"
+            "applicant_summary",
 
-        # --------------------------------------------------
-        # Build Simulation SHAP Section
-        # --------------------------------------------------
+            {},
 
-        simulation_shap = ""
+        )
 
-        for feature in simulation.get("top_features", []):
+        changes = simulation_result.get(
 
-            simulation_shap += f"- {feature}\n"
+            "changes",
 
-        if not simulation_shap:
+            {},
 
-            simulation_shap = "No SHAP features available.\n"
+        )
 
-        # --------------------------------------------------
-        # Build Prompt
-        # --------------------------------------------------
+        shap_comparison = simulation_result.get(
 
+            "shap_comparison",
+
+            {},
+
+        )
+
+        applicant_text = self._build_applicant_summary(
+
+            applicant_summary,
+
+        )
+
+        changes_text = self._build_changes(
+
+            changes,
+
+        )
+
+        shap_text = self._build_shap_section(
+
+            shap_comparison,
+
+        )
         prompt = f"""
-You are a Senior Credit Risk Analyst.
+You are a Senior Credit Risk Analyst at a financial institution.
 
-Your task is to explain the results of a hypothetical
-"What-If" simulation produced by a Machine Learning
-credit risk model.
+Your responsibility is to explain the outcome of a hypothetical
+"What-If" simulation generated by a Machine Learning credit risk model.
 
-====================================================
+The purpose is to help banking professionals understand
+how changing applicant information influenced the prediction.
+
+Do NOT invent information.
+
+Use ONLY the information provided below.
+
+============================================================
 USER QUESTION
-====================================================
+============================================================
 
 {user_question}
 
-====================================================
-ORIGINAL PREDICTION
-====================================================
+============================================================
+APPLICANT SUMMARY
+============================================================
 
-Prediction:
+{applicant_text}
+
+============================================================
+ORIGINAL MODEL RESULT
+============================================================
+
+Decision
+
 {original.get("prediction")}
 
-Repayment Probability:
+Repayment Probability
+
 {original.get("repayment_probability")}
 
-Default Probability:
+Default Probability
+
 {original.get("default_probability")}
 
-====================================================
-SIMULATION PREDICTION
-====================================================
+============================================================
+SIMULATION MODEL RESULT
+============================================================
 
-Prediction:
+Decision
+
 {simulation.get("prediction")}
 
-Repayment Probability:
+Repayment Probability
+
 {simulation.get("repayment_probability")}
 
-Default Probability:
+Default Probability
+
 {simulation.get("default_probability")}
 
-====================================================
-FEATURE CHANGES
-====================================================
+============================================================
+DECISION COMPARISON
+============================================================
 
-{change_text}
+Decision Transition
 
-====================================================
-ORIGINAL TOP SHAP FEATURES
-====================================================
+{comparison.get("decision_transition")}
 
-{original_shap}
+Prediction Changed
 
-====================================================
-SIMULATION TOP SHAP FEATURES
-====================================================
-
-{simulation_shap}
-
-====================================================
-COMPARISON
-====================================================
-
-Prediction Changed:
 {comparison.get("prediction_changed")}
 
-Repayment Probability Difference:
+Risk Change
+
+{comparison.get("risk_change")}
+
+Repayment Probability Difference
+
 {comparison.get("repayment_probability_difference")}
 
-Default Probability Difference:
+Default Probability Difference
+
 {comparison.get("default_probability_difference")}
 
-====================================================
-INSTRUCTIONS
-====================================================
+============================================================
+FEATURE MODIFICATIONS
+============================================================
 
-Explain the simulation professionally.
+{changes_text}
 
-Your explanation should include:
+============================================================
+MODEL EXPLANATION (SHAP)
+============================================================
 
-1. Describe what applicant information changed.
+{shap_text}
 
-2. Explain whether the prediction changed.
+============================================================
+TASK
+============================================================
 
-3. Explain why the prediction did or did not change.
+Write a professional explanation for this simulation.
 
-4. Discuss which features had the greatest influence
-   according to SHAP.
+Your explanation should cover:
 
-5. Mention any remaining risk factors.
+1. Summarize what the user changed.
+
+2. Explain how those changes affected the prediction.
+
+3. Explain whether the repayment probability
+   improved or deteriorated.
+
+4. Explain why the important SHAP features
+   influenced the model.
+
+5. Identify the primary factors responsible
+   for the final prediction.
 
 6. If the prediction did not change,
-   explain why the modifications were insufficient.
+   explain why the changes were insufficient.
 
 7. If the prediction changed,
-   explain which modifications produced the largest
-   improvement or deterioration.
+   explain which changes had the largest impact.
 
-Rules:
+8. Mention any remaining financial risks.
 
-- Use ONLY the supplied information.
-- Never invent applicant data.
-- Never invent banking policy.
-- Do not mention internal model implementation.
-- Keep the explanation suitable for banking
-  professionals.
+============================================================
+RULES
+============================================================
+
+- Use only the supplied information.
+
+- Never invent applicant information.
+
+- Never invent banking policies.
+
+- Never invent SHAP values.
+
+- Never mention LightGBM,
+  Machine Learning implementation,
+  or internal system architecture.
+
+- Explain in clear,
+  professional banking language.
+
+- Focus on causal reasoning instead of
+  simply repeating probabilities.
+
+- Keep the explanation concise,
+  informative,
+  and suitable for financial professionals.
 """
 
         return prompt
@@ -265,33 +419,95 @@ if __name__ == "__main__":
 
         },
 
+        "comparison": {
+
+            "prediction_changed": True,
+
+            "decision_transition":
+
+                "Rejected → Approved",
+
+            "risk_change":
+
+                "Lower Risk",
+
+            "repayment_probability_difference":
+
+                0.54,
+
+            "default_probability_difference":
+
+                -0.54,
+
+        },
+
+        "applicant_summary": {
+
+            "loan_amount":12000,
+
+            "interest_rate":13.33,
+
+            "term":36,
+
+            "sub_grade":"B3",
+
+            "purpose":"debt_consolidation",
+
+            "annual_income":71000,
+
+            "dti":12,
+
+        },
+
         "changes": {
 
             "annual_inc": {
 
-                "old": 71000,
+                "old":71000,
 
-                "new": 95000,
+                "new":95000,
+
+                "direction":"Increase",
+
+                "percentage_change":33.80,
 
             },
 
             "dti": {
 
-                "old": 12,
+                "old":12,
 
-                "new": 8,
+                "new":8,
+
+                "direction":"Decrease",
+
+                "percentage_change":-33.33,
 
             },
 
         },
 
-        "comparison": {
+        "shap_comparison": {
 
-            "prediction_changed": True,
+            "original_top_features":[
 
-            "repayment_probability_difference": 0.54,
+                "dti",
 
-            "default_probability_difference": -0.54,
+                "annual_inc",
+
+                "sub_grade",
+
+            ],
+
+            "simulation_top_features":[
+
+                "annual_inc",
+
+                "dti",
+
+                "sub_grade",
+
+            ],
 
         },
 
@@ -299,7 +515,9 @@ if __name__ == "__main__":
 
     prompt = builder.build_prompt(
 
-        user_question="What happens if annual income increases to 95,000 and DTI decreases to 8?",
+        user_question=
+
+        "What happens if annual income increases to 95,000 and DTI decreases to 8?",
 
         simulation_result=simulation_result,
 
