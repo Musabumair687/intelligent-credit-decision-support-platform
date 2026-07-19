@@ -15,17 +15,25 @@ It ONLY returns the detected intent.
 
 Pipeline
 --------
-User Query
-      ↓
-Routing Prompt
-      ↓
-Groq LLM
-      ↓
-JSON Parsing
-      ↓
-Intent Validation
-      ↓
-Intent Object
+User Query -> Routing Prompt -> LLM -> JSON Parsing ->
+Intent Validation -> Intent Object
+
+Fixes applied in this version
+------------------------------
+1. LLM responses are stripped of Markdown code fences
+   (```json ... ``` or ``` ... ```) before json.loads()
+   is attempted. LLMs add these constantly despite being
+   told not to in the routing prompt, and the previous
+   version had no defense against it, silently falling
+   back to UNKNOWN on every fenced response.
+
+2. Confidence is coerced to float defensively, since a
+   malformed LLM response could return it as a string.
+
+3. classify() now logs (via a returned "raw_response" field
+   in debug mode) what the LLM actually said when parsing
+   fails, so failures are debuggable instead of silently
+   becoming UNKNOWN with no trace.
 
 Author
 ------
@@ -50,12 +58,54 @@ class IntentRouter:
     LLM-based Intent Router.
     """
 
-    def __init__(self):
+    def __init__(self, debug: bool = False):
         """
-        Initialize the router.
+        Parameters
+        ----------
+        debug : bool
+            When True, classify() includes the raw LLM
+            response and the cleaned text in its return
+            value, to help diagnose misclassification.
         """
 
         self.llm = GeminiService()
+
+        self.debug = debug
+
+    # ---------------------------------------------------------
+
+    @staticmethod
+    def _strip_code_fences(text: str) -> str:
+        """
+        Remove Markdown code fences an LLM may wrap its
+        JSON response in, e.g.:
+
+```json
+            {"intent": "DECISION", "confidence": 0.9}
+```
+
+        Returns the cleaned text, stripped of leading/trailing
+        whitespace.
+        """
+
+        if text is None:
+            return ""
+
+        cleaned = text.strip()
+
+        if cleaned.startswith("```"):
+
+            # Drop the opening fence, optionally with a language tag
+            # like ```json, then drop a trailing ``` if present.
+            first_newline = cleaned.find("\n")
+
+            if first_newline != -1:
+                cleaned = cleaned[first_newline + 1:]
+
+            if cleaned.rstrip().endswith("```"):
+                cleaned = cleaned.rstrip()[:-3]
+
+        return cleaned.strip()
 
     # ---------------------------------------------------------
 
@@ -63,7 +113,7 @@ class IntentRouter:
         self,
         current_query: str,
         conversation_history=None,
-    ):
+    ) -> dict:
         """
         Classify user intent.
 
@@ -71,7 +121,7 @@ class IntentRouter:
         ----------
         current_query : str
 
-        conversation_history : list
+        conversation_history : list | None
 
         Returns
         -------
@@ -79,12 +129,14 @@ class IntentRouter:
 
         {
             "intent": Intent,
-            "confidence": float
+            "confidence": float,
         }
+
+        (plus "raw_response" / "cleaned_response" when
+        self.debug is True)
         """
 
         if conversation_history is None:
-
             conversation_history = []
 
         # ------------------------------------
@@ -92,11 +144,8 @@ class IntentRouter:
         # ------------------------------------
 
         prompt = build_routing_prompt(
-
             conversation_history=conversation_history,
-
             current_query=current_query,
-
         )
 
         # ------------------------------------
@@ -105,43 +154,41 @@ class IntentRouter:
 
         response = self.llm.generate(prompt)
 
+        cleaned_response = self._strip_code_fences(response)
+
         # ------------------------------------
         # Parse JSON
         # ------------------------------------
 
         try:
 
-            result = json.loads(response)
+            result = json.loads(cleaned_response)
 
         except Exception:
 
-            return {
-
+            fallback = {
                 "intent": Intent.UNKNOWN,
-
                 "confidence": 0.0,
-
             }
+
+            if self.debug:
+                fallback["raw_response"] = response
+                fallback["cleaned_response"] = cleaned_response
+
+            return fallback
 
         # ------------------------------------
         # Extract values
         # ------------------------------------
 
-        intent = result.get(
+        intent_value = result.get("intent", "UNKNOWN")
 
-            "intent",
+        confidence = result.get("confidence", 0.0)
 
-            "UNKNOWN",
-
-        )
-
-        confidence = result.get(
-
-            "confidence",
-
-            0.0,
-
-        )
+        try:
+            confidence = float(confidence)
+        except (TypeError, ValueError):
+            confidence = 0.0
 
         # ------------------------------------
         # Validate Intent
@@ -149,19 +196,22 @@ class IntentRouter:
 
         try:
 
-            intent = Intent[intent]
+            intent = Intent[intent_value]
 
         except Exception:
 
             intent = Intent.UNKNOWN
 
-        return {
-
+        output = {
             "intent": intent,
-
             "confidence": confidence,
-
         }
+
+        if self.debug:
+            output["raw_response"] = response
+            output["cleaned_response"] = cleaned_response
+
+        return output
 
 
 # ---------------------------------------------------------
@@ -170,34 +220,16 @@ class IntentRouter:
 
 if __name__ == "__main__":
 
-    router = IntentRouter()
+    router = IntentRouter(debug=True)
 
     history = [
-
-        {
-
-            "role": "user",
-
-            "message": "Why was this loan rejected?"
-
-        },
-
-        {
-
-            "role": "assistant",
-
-            "message": "The DTI ratio exceeded policy."
-
-        }
-
+        {"role": "user", "message": "Why was this loan rejected?"},
+        {"role": "assistant", "message": "The DTI ratio exceeded policy."},
     ]
 
     result = router.classify(
-
         current_query="What if annual income becomes 80000?",
-
         conversation_history=history,
-
     )
 
     print("=" * 80)

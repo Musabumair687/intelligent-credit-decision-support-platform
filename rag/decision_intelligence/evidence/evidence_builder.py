@@ -6,14 +6,16 @@ Purpose
 Builds the retrieval evidence required by the
 Decision Intelligence module.
 
-The Evidence Builder coordinates the complete
-Evidence Layer by:
-
-1. Selecting the most important SHAP features.
-2. Generating retrieval queries.
-3. Returning a structured evidence object.
-
-This module does NOT perform retrieval.
+Fix applied in this version
+----------------------------
+The applicant's raw (unencoded) dict is now passed through to
+FeatureSelector.select(), so it can substitute human-readable
+values (e.g. "B3", "MORTGAGE") in place of the label-encoded
+integers that live inside the SHAP Explanation object. Without
+this, categorical top_features showed meaningless encoder IDs
+(sub_grade: 7, home_ownership: 1) to both the LLM and the end
+user, which previously caused the LLM to misinterpret an encoder
+ID as a real grade value in its explanation.
 
 Author
 ------
@@ -35,64 +37,60 @@ class EvidenceBuilder:
     """
 
     def __init__(self):
-        """
-        Initialize Evidence Builder.
-        """
-
         self.feature_selector = FeatureSelector()
-
         self.query_generator = QueryGenerator()
 
     # ---------------------------------------------------------
 
-    def build(
-        self,
-        context: dict,
-    ) -> dict:
+    def build(self, context: dict) -> dict:
         """
         Build retrieval evidence.
 
         Parameters
         ----------
         context : dict
-
-            Prediction context.
+            Prediction context. Must include "applicant" (the raw,
+            unencoded applicant dict) and "shap_explanation".
 
         Returns
         -------
         dict
-
             Evidence object.
         """
 
-        
+        applicant = context["applicant"]
+
+        shap_explanation = context["shap_explanation"]
+
+        # ---------------------------------------------
+        # Select top SHAP features, decoded back to
+        # human-readable values using the raw applicant dict.
+        # ---------------------------------------------
 
         top_features = self.feature_selector.select(
-
-        context["shap_explanation"]
-
-    )
-
-        retrieval_query = self.query_generator.generate(
-
-            top_features,
-
+            shap_explanation=shap_explanation,
+            applicant=applicant,
         )
 
+        # ---------------------------------------------
+        # Generate retrieval query
+        # ---------------------------------------------
+
+        retrieval_query = self.query_generator.generate(top_features)
+
+        # ---------------------------------------------
+        # Build evidence package
+        # ---------------------------------------------
+
         evidence = {
-
-            "prediction":
-            context["prediction"],
-
-            "probability":
-            context["probability"],
-
-            "top_features":
-            top_features,
-
-            "retrieval_query":
-            retrieval_query,
-
+            "applicant": applicant,
+            "prediction": context["prediction"],
+            "repayment_probability": context["repayment_probability"],
+            "default_probability": context["default_probability"],
+            "shap_explanation": shap_explanation,
+            "top_features": top_features,
+            "retrieval_query": retrieval_query,
+            "retrieved_documents": [],
         }
 
         return evidence
@@ -103,55 +101,7 @@ class EvidenceBuilder:
 # ---------------------------------------------------------
 
 if __name__ == "__main__":
-
-    context = {
-
-        "applicant": {
-
-            "loan_amount": 25000,
-
-            "annual_income": 50000,
-
-            "dti": 41,
-
-            "grade": "B3",
-
-            "interest_rate": 12.7,
-
-        },
-
-        "prediction": "Charged Off",
-
-        "probability": 0.84,
-
-        "shap_values": {
-
-            "dti": 0.44,
-
-            "annual_income": -0.28,
-
-            "grade": 0.17,
-
-            "interest_rate": 0.12,
-
-            "loan_amount": 0.05,
-
-        }
-
-    }
-
-    builder = EvidenceBuilder()
-
-    evidence = builder.build(context)
-
     print("=" * 80)
-    print("EVIDENCE")
+    print("EvidenceBuilder uses SHAP Explanation objects.")
+    print("Please test this module through orchestrator.py")
     print("=" * 80)
-
-    for key, value in evidence.items():
-
-        print(f"\n{key}")
-
-        print("-" * 80)
-
-        print(value)
