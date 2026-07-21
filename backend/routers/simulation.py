@@ -1,31 +1,50 @@
 """
 simulation.py
 
-Runs a What-If simulation via Orchestrator's internal simulation
-pipeline. Note: this calls the "private" _run_simulation_pipeline
-method directly rather than going through process_request(),
-because this endpoint is explicitly for simulation requests —
-there's no need to spend an LLM call re-detecting intent when the
-caller already knows what they want. (The leading underscore on
-that method is just a Python convention; it's not access-controlled.)
+Runs a What-If simulation. Accepts EITHER structured `changes`
+(explicit field -> new-value mapping, used by the Simulation page's
+form), OR free text within `question` alone — if `changes` is empty
+or omitted, Orchestrator now parses the question itself (a fast
+regex/synonym heuristic first, an LLM extraction fallback second) to
+determine what to change. This is what powers a chat-typed "what if
+annual income increases to 150000?" without the frontend needing to
+parse anything itself.
+
+Author
+------
+Intelligent Credit Decision Support Platform
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+import logging
+import time
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend.dependencies import get_orchestrator
-from backend.schemas import SimulationRequest
-from backend.serializers import dump_model, to_jsonable
+from backend.schemas import AIResponse, SimulationRequest
+from backend.serializers import build_ai_response, dump_model
 
 router = APIRouter(prefix="/api/v1", tags=["simulation"])
+logger = logging.getLogger("backend.simulation")
 
 
-@router.post("/simulate")
-def run_simulation(payload: SimulationRequest, orchestrator=Depends(get_orchestrator)):
-
+@router.post(
+    "/simulate",
+    response_model=AIResponse,
+    response_model_exclude_none=True,
+    summary="Run a what-if simulation, with structured or free-text changes",
+)
+def run_simulation(
+    payload: SimulationRequest,
+    debug: bool = Query(
+        False, description="Include the full internal LLM prompt in the response."
+    ),
+    orchestrator=Depends(get_orchestrator),
+):
     applicant = dump_model(payload.applicant) if payload.applicant else None
+    started = time.perf_counter()
 
     try:
-
         result = orchestrator._run_simulation_pipeline(
             question=payload.question,
             applicant=applicant,
@@ -34,15 +53,20 @@ def run_simulation(payload: SimulationRequest, orchestrator=Depends(get_orchestr
         )
 
     except ValueError as error:
-        # Raised when no applicant is supplied AND no session
-        # exists to fall back on (see orchestrator.py), or from
-        # PredictionService validation inside SimulationEngine.
+        # Covers: no applicant + no session to fall back on, and
+        # "could not identify what to change from that question".
         raise HTTPException(status_code=422, detail=str(error))
 
     except Exception as error:
+        logger.exception("Simulation pipeline failed")
         raise HTTPException(
-            status_code=500,
-            detail=f"Simulation pipeline failed: {error}",
+            status_code=500, detail=f"Simulation pipeline failed: {error}"
         )
 
-    return to_jsonable(result)
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    logger.info(
+        "session=%s intent=%s elapsed_ms=%.1f",
+        payload.session_id, result.get("intent"), elapsed_ms,
+    )
+
+    return build_ai_response(result, elapsed_ms, payload.session_id, debug)

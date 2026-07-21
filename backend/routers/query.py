@@ -1,32 +1,56 @@
 """
 query.py
 
-Single unified entrypoint: lets the Orchestrator's IntentRouter
-decide whether an incoming message is a decision / simulation /
-knowledge / general question, and runs the matching pipeline.
+Single unified entrypoint: lets the Orchestrator's IntentRouter decide
+whether an incoming message is a decision follow-up, a what-if
+simulation, a bank-policy knowledge question, or general small talk,
+and runs the matching pipeline automatically.
 
-This is the endpoint a chat-style frontend should call for every
-message in a conversation — it's the closest match to
-Orchestrator.process_request(), the method your own architecture
-diagram shows as the single entrypoint beneath the frontend.
+This is THE endpoint the post-prediction "Ask AI" chat calls for
+every message. It does not require the caller to know which pipeline
+handles the question — only a session_id from a prior prediction (for
+follow-ups), or a fresh `applicant` (for a brand-new decision inside
+the same call).
+
+The response's "intent" field is what the frontend uses to display,
+e.g., "Identified: Simulation question" before rendering the answer —
+see backend.schemas.AIResponse.
+
+Author
+------
+Intelligent Credit Decision Support Platform
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+import logging
+import time
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from backend.dependencies import get_orchestrator
-from backend.schemas import QueryRequest
-from backend.serializers import dump_model, to_jsonable
+from backend.schemas import AIResponse, QueryRequest
+from backend.serializers import build_ai_response, dump_model
 
 router = APIRouter(prefix="/api/v1", tags=["query"])
+logger = logging.getLogger("backend.query")
 
 
-@router.post("/query")
-def run_query(payload: QueryRequest, orchestrator=Depends(get_orchestrator)):
-
+@router.post(
+    "/query",
+    response_model=AIResponse,
+    response_model_exclude_none=True,
+    summary="Ask anything — intent is detected automatically",
+)
+def run_query(
+    payload: QueryRequest,
+    debug: bool = Query(
+        False, description="Include the full internal LLM prompt in the response."
+    ),
+    orchestrator=Depends(get_orchestrator),
+):
     applicant = dump_model(payload.applicant) if payload.applicant else None
+    started = time.perf_counter()
 
     try:
-
         result = orchestrator.process_request(
             user_question=payload.question,
             applicant=applicant,
@@ -38,6 +62,13 @@ def run_query(payload: QueryRequest, orchestrator=Depends(get_orchestrator)):
         raise HTTPException(status_code=422, detail=str(error))
 
     except Exception as error:
+        logger.exception("Query failed")
         raise HTTPException(status_code=500, detail=f"Query failed: {error}")
 
-    return to_jsonable(result)
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    logger.info(
+        "session=%s intent=%s elapsed_ms=%.1f",
+        payload.session_id, result.get("intent"), elapsed_ms,
+    )
+
+    return build_ai_response(result, elapsed_ms, payload.session_id, debug)

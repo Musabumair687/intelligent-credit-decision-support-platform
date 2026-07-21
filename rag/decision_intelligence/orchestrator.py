@@ -20,50 +20,83 @@ Instead, it coordinates the specialized modules.
 Pipelines
 ---------
 
-Decision Pipeline
+Decision Pipeline (first turn: full explain)
 
 Prediction -> Feature Selection -> Query Generation ->
 Retrieval -> Evidence Builder -> Decision Prompt ->
 Response Generator
 
+Decision Pipeline (follow-up turn: lightweight)
+
+Reuse stored Prediction + SHAP + Retrieved Documents from the
+session -> Decision Prompt (new question) -> Response Generator
+
 Simulation Pipeline
 
+Change Extraction (structured input, or parsed from free text) ->
 Simulation Engine -> Simulation Prompt -> Response Generator
 
-General / Knowledge Pipeline
+Knowledge Pipeline
 
 Retrieval -> General Prompt -> Response Generator
 
-Fixes applied in this version
-------------------------------
-1. intent_router.classify(...) is now called correctly
-   (the method is `classify`, not `route`), and its return
-   value (a dict containing an Intent enum) is unpacked and
-   compared against Intent members instead of raw strings.
+General Pipeline
 
-2. simulation_prompt.build_prompt(...) is now called with
-   the correct method name and keyword arguments (the method
-   was `build_prompt`, not `build`, and its second argument
-   is `simulation_result`, not `simulation`).
+General Prompt -> Response Generator
 
-3. The general pipeline now performs retrieval before calling
+Fixes / features in this version
+---------------------------------
+1. intent_router.classify(...) is called correctly and its return value
+   (a dict containing an Intent enum) is unpacked and compared against
+   Intent members instead of raw strings.
+
+2. simulation_prompt.build_prompt(...) is called with the correct method
+   name and keyword arguments.
+
+3. The general and knowledge pipelines perform retrieval before calling
    general_prompt.build(), since GeneralPrompt.build() requires
-   retrieved_documents and previously received none.
+   retrieved_documents.
 
-4. Session handling now goes through SessionManager.create_session
-   / update_session / save (save previously did not exist), and
-   a single shared SessionManager + ContextManager instance is
-   used consistently instead of ContextManager silently owning
-   its own, disconnected SessionManager.
+4. Session handling goes through SessionManager.create_session /
+   update_session / save consistently, using a single shared
+   SessionManager + ContextManager instance.
 
-5. Conversation history is now passed into intent classification
-   so multi-turn "what if" follow-ups have context.
+5. Conversation history is passed into intent classification so
+   multi-turn "what if" follow-ups have context.
+
+6. Every pipeline result now includes an explicit "intent" field
+   ("DECISION" / "SIMULATION" / "KNOWLEDGE" / "GENERAL"), so a caller of
+   /api/v1/query (e.g. the post-prediction "Ask AI" chat) has an
+   authoritative answer to "which pipeline actually ran" instead of
+   having to guess from the response's shape.
+
+7. NEW — Decision follow-up questions no longer re-run the ML model.
+   Previously, _run_decision_pipeline always called explain(), which
+   requires a full applicant dict and re-runs prediction + SHAP +
+   retrieval from scratch. That made "why was this rejected?" as a chat
+   follow-up either impossible (no applicant available) or wastefully
+   expensive (re-predicting an unchanged applicant). Now: if no
+   applicant is passed in, the pipeline reuses the prediction, SHAP
+   explanation, and retrieved documents already stored in the session
+   from the original /api/v1/decision call, and only rebuilds the
+   prompt for the new question. This is both correct (nothing about
+   the applicant changed) and cheap (no model call, no retrieval call).
+
+8. NEW — Simulation follow-ups asked in free text (e.g. "what if annual
+   income increases to 150000?") are now parsed into the structured
+   {field: new_value} dict simulation_engine.simulate() expects, via
+   _extract_changes(): a fast regex/synonym heuristic first, falling
+   back to a small LLM extraction call only if the heuristic finds
+   nothing. This keeps the common, clearly-phrased case instant and
+   free, and only pays the extra LLM round-trip for ambiguous phrasing.
 
 Author
 ------
 Intelligent Credit Decision Support Platform
 """
 
+import json
+import re
 from typing import Optional
 
 # ==========================================================
@@ -158,6 +191,25 @@ class Orchestrator:
     Coordinates the complete Decision Intelligence workflow.
     """
 
+    # -------------------------------------------------------
+    # Fields the Simulation pipeline is allowed to change, and
+    # the plain-English synonyms the regex heuristic looks for.
+    # Longer synonyms are checked before shorter ones so, e.g.,
+    # "loan amount" matches before the bare word "loan" does.
+    # -------------------------------------------------------
+    SIM_FIELD_SYNONYMS = {
+        "annual_inc": ["annual income", "yearly income", "gross income", "income", "salary"],
+        "dti": ["debt-to-income", "debt to income", "dti"],
+        "loan_amnt": ["loan amount", "amount"],
+        "revol_util": ["revolving utilization", "credit utilization", "utilization"],
+        "revol_bal": ["revolving balance", "credit card balance", "balance"],
+        "emp_length": ["employment length", "years employed", "employment"],
+        "int_rate": ["interest rate", "rate"],
+        "open_acc": ["open accounts", "open credit lines"],
+        "total_acc": ["total accounts", "total credit lines"],
+        "mort_acc": ["mortgage accounts", "mortgages"],
+    }
+
     def __init__(self):
         """
         Initialize every module required by the system.
@@ -240,16 +292,25 @@ class Orchestrator:
         """
         Main entry point of the Decision Intelligence system.
 
-        Every frontend request should enter the system
-        through this function.
+        This is the single endpoint a chat-style "Ask AI" experience
+        should call: it detects intent first, then dispatches to
+        exactly one of the four pipelines below. Every returned dict
+        includes an "intent" field naming which pipeline actually ran.
 
         Parameters
         ----------
         user_question : str
 
         applicant : dict | None
+            Only needed for a first-ever decision in a new session.
+            Chat follow-ups (decision or simulation) should omit this
+            and rely on the session's stored applicant instead.
 
         simulation_changes : dict | None
+            Structured {field: new_value} changes. Optional — if the
+            detected intent is SIMULATION and this is empty, the
+            question text itself is parsed for changes (see
+            _extract_changes).
 
         session_id : str | None
 
@@ -338,8 +399,13 @@ class Orchestrator:
         session_id: Optional[str] = None,
     ) -> dict:
         """
-        Complete Decision Intelligence pipeline: predict,
-        build evidence, retrieve policy support, and explain.
+        Complete Decision Intelligence pipeline: predict, build
+        evidence, retrieve policy support, and explain. This is the
+        FULL, expensive path — model call, SHAP, retrieval, all of it.
+
+        Called directly by /api/v1/decision (a fresh applicant is
+        always submitted there), and by _run_decision_pipeline only
+        when an applicant IS supplied (i.e. not a chat follow-up).
 
         Parameters
         ----------
@@ -361,8 +427,8 @@ class Orchestrator:
         prediction = self.prediction_service.predict(applicant)
 
         # -------------------------------------------------
-        # Step 2 — Persist session so ContextManager and
-        # any downstream "what-if" request can find it.
+        # Step 2 — Persist session so ContextManager and any
+        # downstream follow-up or what-if question can find it.
         # -------------------------------------------------
 
         self.session_manager.create_session(
@@ -381,7 +447,7 @@ class Orchestrator:
         )
 
         # -------------------------------------------------
-        # Step 3 — Build Context (now actually used)
+        # Step 3 — Build Context
         # -------------------------------------------------
 
         prediction_context = self.context_manager.build_prediction_context(
@@ -446,6 +512,90 @@ class Orchestrator:
             "answer": answer,
         }
 
+    # ---------------------------------------------------------
+
+    def _explain_followup(
+        self,
+        question: str,
+        session_id: Optional[str] = None,
+    ) -> dict:
+        """
+        Lightweight decision follow-up: answers a NEW question about
+        an ALREADY-PREDICTED applicant, without re-running the model,
+        SHAP, or retrieval — all three are reused from the session,
+        since nothing about the applicant has changed.
+
+        Raises
+        ------
+        ValueError
+            If no prediction session exists yet for this session_id
+            (i.e. the caller asked a decision question before ever
+            running a prediction).
+        """
+
+        session = self.session_manager.get_session(session_id=session_id)
+
+        if session is None or session.get("prediction") is None:
+            raise ValueError(
+                "No applicant supplied and no active prediction session "
+                "exists. Run a prediction first, then ask a follow-up "
+                "question about it."
+            )
+
+        self.session_manager.add_message(
+            role="user",
+            message=question,
+            session_id=session_id,
+        )
+
+        prediction_context = self.context_manager.build_prediction_context(
+            session_id=session_id,
+        )
+
+        evidence_input = {
+            "applicant": prediction_context["applicant"],
+            "prediction": prediction_context["prediction"],
+            "repayment_probability": prediction_context["repayment_probability"],
+            "default_probability": prediction_context["default_probability"],
+            "shap_explanation": prediction_context["shap_explanation"],
+        }
+
+        # Recomputing top_features here is cheap (just sorting the
+        # already-computed SHAP values) — no model or retrieval call.
+        evidence = self.evidence_builder.build(evidence_input)
+
+        # Reuse the documents retrieved during the ORIGINAL prediction
+        # rather than retrieving again: retrieval was driven by SHAP
+        # top_features, not by the free-text question, and those
+        # features haven't changed, so a fresh retrieval call would
+        # return the same documents at the cost of an extra round-trip.
+        evidence["retrieved_documents"] = session.get("retrieved_documents", [])
+
+        prompt = self.decision_prompt.build(
+            user_question=question,
+            evidence=evidence,
+        )
+
+        answer = self.response_generator.generate(prompt)
+
+        self.session_manager.add_message(
+            role="assistant",
+            message=answer,
+            session_id=session_id,
+        )
+
+        return {
+            "prediction": {
+                "prediction": prediction_context["prediction"],
+                "repayment_probability": prediction_context["repayment_probability"],
+                "default_probability": prediction_context["default_probability"],
+                "top_features": evidence["top_features"],
+            },
+            "evidence": evidence,
+            "prompt": prompt,
+            "answer": answer,
+        }
+
     # ======================================================
     # Internal Pipelines
     # ======================================================
@@ -453,21 +603,36 @@ class Orchestrator:
     def _run_decision_pipeline(
         self,
         question: str,
-        applicant: dict,
+        applicant: Optional[dict],
         session_id: Optional[str] = None,
     ) -> dict:
         """
-        Execute the complete Decision pipeline.
+        Execute the Decision pipeline. Reached either directly via
+        /api/v1/decision (applicant always supplied there), or via
+        /api/v1/query once the Intent Router has classified the
+        question as DECISION.
+
+        If applicant is supplied, runs the full (expensive) explain().
+        If applicant is None — the normal case for a chat follow-up —
+        runs the lightweight _explain_followup() instead.
         """
 
-        result = self.explain(
-            applicant=applicant,
-            user_question=question,
-            session_id=session_id,
-        )
+        if applicant is not None:
+            result = self.explain(
+                applicant=applicant,
+                user_question=question,
+                session_id=session_id,
+            )
+        else:
+            result = self._explain_followup(
+                question=question,
+                session_id=session_id,
+            )
+
+        result = {"intent": "DECISION", **result}
 
         self.session_manager.save(
-            interaction={"type": "decision", **result},
+            interaction=result,
             session_id=session_id,
         )
 
@@ -475,43 +640,203 @@ class Orchestrator:
 
     # ---------------------------------------------------------
 
+    def _extract_changes_heuristic(self, question: str, applicant: dict) -> dict:
+        """
+        Fast, free, zero-latency pass at extracting {field: new_value}
+        from a what-if question, using known field synonyms and a
+        nearby number. Handles the common, clearly-phrased case, e.g.:
+
+            "what if annual income increases to 150k?"       -> {"annual_inc": 150000}
+            "what if the loan amount was 8000 instead?"       -> {"loan_amnt": 8000}
+            "what if dti decreases to 8?"                     -> {"dti": 8}
+
+        Does NOT handle vague phrasing ("what if they made more
+        money") — that falls through to _extract_changes_with_llm.
+
+        Returns
+        -------
+        dict
+            Possibly empty if nothing was confidently matched.
+        """
+
+        text = question.lower()
+        changes = {}
+
+        for field, synonyms in self.SIM_FIELD_SYNONYMS.items():
+
+            if field not in applicant:
+                continue
+
+            for synonym in sorted(synonyms, key=len, reverse=True):
+
+                idx = text.find(synonym)
+
+                if idx == -1:
+                    continue
+
+                # Look at a short window of text right after the
+                # synonym for the first number that appears.
+                window = text[idx + len(synonym): idx + len(synonym) + 40]
+
+                match = re.search(r"\$?\s?([\d][\d,]*(?:\.\d+)?)\s?(k|thousand)?", window)
+
+                if not match:
+                    continue
+
+                raw_number = match.group(1).replace(",", "")
+
+                try:
+                    value = float(raw_number)
+                except ValueError:
+                    continue
+
+                if match.group(2):
+                    value *= 1000
+
+                changes[field] = value
+                break  # matched this field; move to the next one
+
+        return changes
+
+    # ---------------------------------------------------------
+
+    def _extract_changes_with_llm(self, question: str, applicant: dict) -> dict:
+        """
+        Fallback extraction for what-if questions the regex heuristic
+        couldn't confidently parse. Asks the LLM to return the changed
+        fields as strict JSON, using only field names that exist on
+        the applicant. Never raises — any failure (bad JSON, empty
+        response, LLM error) simply returns {}, which the caller
+        treats as "could not determine what to change."
+        """
+
+        known_fields = {
+            k: applicant[k] for k in self.SIM_FIELD_SYNONYMS.keys() if k in applicant
+        }
+
+        prompt = f"""
+You are a Structured Change Extractor for a credit-simulation system.
+
+Given a user's "what if" question and the applicant's current field
+values, extract ONLY the fields the user wants changed, together with
+their NEW numeric value.
+
+Valid fields and current values:
+{json.dumps(known_fields, indent=2)}
+
+Rules:
+- Return ONLY valid JSON. No explanation. No markdown code fences.
+- Keys must be exactly one of the valid field names shown above.
+- Values must be plain numbers — no "$", no commas, and convert a "k"
+  suffix to thousands (e.g. "150k" -> 150000).
+- Only include fields the question actually asks to change.
+- If the question does not specify any concrete new value, return {{}}.
+
+Question:
+{question}
+
+JSON:
+"""
+
+        try:
+            raw = self.response_generator.generate(prompt)
+        except Exception:
+            return {}
+
+        cleaned = (raw or "").strip()
+
+        if cleaned.startswith("```"):
+            first_newline = cleaned.find("\n")
+            if first_newline != -1:
+                cleaned = cleaned[first_newline + 1:]
+            if cleaned.rstrip().endswith("```"):
+                cleaned = cleaned.rstrip()[:-3]
+        cleaned = cleaned.strip()
+
+        try:
+            parsed = json.loads(cleaned)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+        if not isinstance(parsed, dict):
+            return {}
+
+        result = {}
+        for key, value in parsed.items():
+            if key not in self.SIM_FIELD_SYNONYMS:
+                continue
+            try:
+                result[key] = float(value)
+            except (TypeError, ValueError):
+                continue
+
+        return result
+
+    # ---------------------------------------------------------
+
+    def _extract_changes(self, question: str, applicant: dict) -> dict:
+        """
+        Two-stage change extraction: try the free heuristic first,
+        only pay for an LLM call if it finds nothing.
+        """
+
+        changes = self._extract_changes_heuristic(question, applicant)
+
+        if changes:
+            return changes
+
+        return self._extract_changes_with_llm(question, applicant)
+
+    # ---------------------------------------------------------
+
     def _run_simulation_pipeline(
         self,
         question: str,
-        applicant: dict,
-        simulation_changes: dict,
+        applicant: Optional[dict],
+        simulation_changes: Optional[dict],
         session_id: Optional[str] = None,
     ) -> dict:
         """
-        Execute the complete Simulation pipeline.
-        """
+        Execute the Simulation pipeline. Reached either directly via
+        /api/v1/simulate (structured changes always supplied there),
+        or via /api/v1/query once the Intent Router has classified a
+        chat question as SIMULATION — the "what if annual income
+        increases to 150000?" path.
 
-        # If the caller didn't pass an applicant explicitly,
-        # fall back to the applicant already on file for this
-        # session (typical for a follow-up "what if" question).
+        If applicant is None, falls back to the session's stored
+        applicant. If simulation_changes is empty, parses the question
+        text into structured changes via _extract_changes().
+        """
 
         if applicant is None:
 
-            session = self.session_manager.get_session(
-                session_id=session_id,
-            )
+            session = self.session_manager.get_session(session_id=session_id)
 
-            if session is None:
+            if session is None or session.get("applicant") is None:
                 raise ValueError(
-                    "No applicant supplied and no active session "
-                    "exists to simulate against."
+                    "No applicant supplied and no active prediction "
+                    "session exists to simulate against. Run a "
+                    "prediction first, then ask the what-if question."
                 )
 
             applicant = session["applicant"]
 
+        changes = simulation_changes or {}
+
+        if not changes:
+            changes = self._extract_changes(question, applicant)
+
+        if not changes:
+            raise ValueError(
+                "Could not identify which value(s) to change from that "
+                "question. Try being specific, e.g. 'what if annual "
+                "income increases to 150000?'"
+            )
+
         simulation = self.simulation_engine.simulate(
             applicant=applicant,
-            changes=simulation_changes,
+            changes=changes,
         )
-
-        # NOTE: SimulationPrompt exposes build_prompt(...), not
-        # build(...), and its second argument is named
-        # simulation_result, not simulation.
 
         prompt = self.simulation_prompt.build_prompt(
             user_question=question,
@@ -521,6 +846,7 @@ class Orchestrator:
         answer = self.response_generator.generate(prompt)
 
         result = {
+            "intent": "SIMULATION",
             "simulation": simulation,
             "prompt": prompt,
             "answer": answer,
@@ -539,7 +865,7 @@ class Orchestrator:
         )
 
         self.session_manager.save(
-            interaction={"type": "simulation", **result},
+            interaction=result,
             session_id=session_id,
         )
 
@@ -554,10 +880,13 @@ class Orchestrator:
     ) -> dict:
         """
         Execute the Knowledge / bank-policy pipeline: retrieve
-        relevant policy chunks directly from the retrieval
-        engine (using the raw question as the query, since
-        there is no SHAP-derived evidence for a pure policy
-        question), then answer using GeneralPrompt.
+        relevant policy chunks using the raw question as the query,
+        then answer using GeneralPrompt.
+
+        Reached either directly via /api/v1/knowledge (the standalone
+        Policy Knowledge page — plain RAG, no prediction context), or
+        via /api/v1/query once the Intent Router has classified a
+        post-prediction chat question as KNOWLEDGE.
         """
 
         evidence = {"retrieval_query": question}
@@ -577,6 +906,7 @@ class Orchestrator:
         answer = self.response_generator.generate(prompt)
 
         result = {
+            "intent": "KNOWLEDGE",
             "prompt": prompt,
             "answer": answer,
             "retrieved_documents": evidence["retrieved_documents"],
@@ -595,7 +925,7 @@ class Orchestrator:
         )
 
         self.session_manager.save(
-            interaction={"type": "knowledge", **result},
+            interaction=result,
             session_id=session_id,
         )
 
@@ -611,9 +941,7 @@ class Orchestrator:
         """
         Execute the General Question pipeline for small talk /
         anything that isn't a decision, simulation, or policy
-        question. Uses GeneralPrompt with an empty document set
-        so it will correctly respond that it has no grounding,
-        rather than crashing on a missing argument.
+        question. Uses GeneralPrompt with an empty document set.
         """
 
         prompt = self.general_prompt.build(
@@ -624,12 +952,13 @@ class Orchestrator:
         answer = self.response_generator.generate(prompt)
 
         result = {
+            "intent": "GENERAL",
             "prompt": prompt,
             "answer": answer,
         }
 
         self.session_manager.save(
-            interaction={"type": "general", **result},
+            interaction=result,
             session_id=session_id,
         )
 
@@ -666,44 +995,35 @@ if __name__ == "__main__":
         "pub_rec_bankruptcies": 0,
     }
 
-    question = "Why was this applicant rejected?"
+    print("=" * 80)
+    print("STEP 1 — Run a prediction (establishes the session)")
+    print("=" * 80)
 
     result = orchestrator.explain(
         applicant=applicant,
-        user_question=question,
-        session_id="test-session",
+        user_question="Why was this applicant rejected?",
+        session_id="demo-session",
     )
+    print("Prediction:", result["prediction"]["prediction"])
 
+    print()
     print("=" * 80)
-    print("ORCHESTRATOR TEST")
+    print("STEP 2 — Ask follow-ups through process_request(), letting the")
+    print("Intent Router decide what kind of question each one is, with NO")
+    print("applicant resupplied — exactly how the post-prediction chat works")
     print("=" * 80)
 
-    print("\nPrediction")
-    print("-" * 80)
-    print(result["prediction"]["prediction"])
+    followups = [
+        "Why was this applicant rejected?",
+        "What if annual income increases to 150000?",
+        "What is the maximum allowed DTI?",
+    ]
 
-    print("\nRepayment Probability")
-    print("-" * 80)
-    print(result["prediction"]["repayment_probability"])
-
-    print("\nDefault Probability")
-    print("-" * 80)
-    print(result["prediction"]["default_probability"])
-
-    print("\nTop SHAP Features")
-    print("-" * 80)
-
-    for feature in result["evidence"]["top_features"]:
-        print(f"{feature['feature']} (Importance: {feature['importance']:.4f})")
-
-    print("\nRetrieved Documents")
-    print("-" * 80)
-    print(len(result["evidence"]["retrieved_documents"]))
-
-    print("\nPrompt Preview")
-    print("-" * 80)
-    print(result["prompt"][:1000])
-
-    print("\nFinal AI Response")
-    print("-" * 80)
-    print(result["answer"])
+    for q in followups:
+        r = orchestrator.process_request(
+            user_question=q,
+            session_id="demo-session",
+        )
+        print(f"\nQuestion: {q}")
+        print(f"Detected intent: {r['intent']}")
+        print(f"Answer preview: {r['answer'][:150]}...")
