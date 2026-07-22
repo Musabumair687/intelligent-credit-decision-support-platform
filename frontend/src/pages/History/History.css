@@ -1,0 +1,22 @@
+.history-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.history-empty {
+  text-align: center;
+  padding: 48px 16px;
+  color: #9CA3AF;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.history-empty p:first-of-type {
+  font-size: 15px;
+  font-weight: 600;
+  color: #6B7280;
+}

@@ -1,0 +1,80 @@
+.dashboard-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-list-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.dashboard-list-item:last-child {
+  border-bottom: none;
+}
+
+.dashboard-grade-badge {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: white;
+  flex-shrink: 0;
+}
+
+.dashboard-list-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.dashboard-list-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: white;
+}
+
+.dashboard-list-meta {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 1px;
+}
+
+.dashboard-review-item {
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.dashboard-review-item:last-child {
+  border-bottom: none;
+}
+
+.cta-card {
+  position: relative;
+}
+
+.cta-arrow {
+  position: absolute;
+  top: 22px;
+  right: 22px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.5);
+  transition: all 0.3s;
+}
+
+.cta-card:hover .cta-arrow {
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+  transform: translateX(3px);
+}
