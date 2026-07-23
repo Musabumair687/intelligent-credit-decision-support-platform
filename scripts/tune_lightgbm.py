@@ -132,13 +132,14 @@ y_prob = best_model.predict_proba(X_test)[:, 1]
 print("\n========== Test Results ==========\n")
 
 print(f"Accuracy : {accuracy_score(y_test, y_pred):.4f}")
-from sklearn.metrics import roc_auc_score
 
-probs = model.predict_proba(X_test)[:, 1]
+print(f"Precision: {precision_score(y_test, y_pred):.4f}")
 
-print(roc_auc_score(y_test, probs))
+print(f"Recall   : {recall_score(y_test, y_pred):.4f}")
 
+print(f"F1 Score : {f1_score(y_test, y_pred):.4f}")
 
+print(f"ROC AUC  : {roc_auc_score(y_test, y_prob):.4f}")
 
 print("\nClassification Report\n")
 

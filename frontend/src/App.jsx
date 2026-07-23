@@ -1,35 +1,41 @@
+import { useEffect } from 'react'
 import { useApp } from './context/AppContext'
-import Login from './pages/Login/Login'
-import Dashboard from './pages/Dashboard/Dashboard'
-import LoanPrediction from './pages/LoanPrediction/LoanPrediction'
-import KnowledgeAssistant from './pages/KnowledgeAssistant/KnowledgeAssistant'
-import History from './pages/History/History'
-import Settings from './pages/Settings/Settings'
-import Sidebar from './components/Sidebar/Sidebar'
-import FloatingAI from './components/FloatingAI/FloatingAI'
+import Login from './pages/Login'
+import Nav from './components/Nav'
+import Home from './pages/Home'
+import Dashboard from './pages/Dashboard'
+import LoanPrediction from './pages/LoanPrediction'
+import KnowledgeAssistant from './pages/KnowledgeAssistant'
+import Reports from './pages/Reports'
+import DataExport from './pages/DataExport'
 
 const PAGES = {
+  'Home': Home,
   'Dashboard': Dashboard,
   'Loan Prediction': LoanPrediction,
   'Knowledge Assistant': KnowledgeAssistant,
-  'History': History,
-  'Settings': Settings,
+  'Reports': Reports,
+  'Data': DataExport,
 }
 
 export default function App() {
   const { state } = useApp()
 
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', state.theme)
+  }, [state.theme])
+
   if (!state.authenticated) return <Login />
 
-  const PageComponent = PAGES[state.currentPage] || Dashboard
-
+  const Page = PAGES[state.page] || Home
   return (
-    <div className="app-layout">
-      <Sidebar />
-      <main className="main-content" key={state.currentPage}>
-        <PageComponent />
-      </main>
-      <FloatingAI />
+    <div>
+      <Nav />
+      <div className="page-wrap">
+        <div className="main">
+          <Page />
+        </div>
+      </div>
     </div>
   )
 }

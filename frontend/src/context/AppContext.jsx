@@ -1,74 +1,50 @@
 import { createContext, useContext, useReducer } from 'react'
 
-const genSessionId = () => 'sess-' + Math.random().toString(36).substring(2, 10)
+const genId = () => 'sess-' + Math.random().toString(36).slice(2,10)
 
-const initialState = {
+const init = {
   authenticated: false,
+  theme: 'dark',        // 'dark' | 'light'
   apiBase: 'http://127.0.0.1:8000',
-  sessionId: genSessionId(),
-  currentPage: 'Dashboard',
-  navGroupOpen: 'workspace',
+  sessionId: genId(),
+  page: 'Home',
   history: [],
-  lastApplicant: null,
   lastPrediction: null,
+  lastApplicant: null,
   probTrend: [],
   decisionChat: [],
   kbChat: [],
-  pendingQuestion: null,
 }
 
-function reducer(state, action) {
-  switch (action.type) {
-    case 'LOGIN':
-      return { ...state, authenticated: true }
-    case 'LOGOUT':
-      return { ...initialState, authenticated: false, sessionId: genSessionId() }
-    case 'SET_PAGE':
-      return { ...state, currentPage: action.payload }
-    case 'SET_NAV_GROUP':
-      return { ...state, navGroupOpen: action.payload }
-    case 'SET_PREDICTION':
-      return {
-        ...state,
-        lastApplicant: action.payload.applicant,
-        lastPrediction: action.payload.prediction,
-        decisionChat: [],
-        probTrend: [...state.probTrend, action.payload.prediction.repayment_probability],
-      }
-    case 'ADD_HISTORY':
-      return { ...state, history: [action.payload, ...state.history] }
-    case 'CLEAR_HISTORY':
-      return { ...state, history: [] }
-    case 'ADD_DECISION_CHAT':
-      return { ...state, decisionChat: [...state.decisionChat, action.payload] }
-    case 'CLEAR_DECISION_CHAT':
-      return { ...state, decisionChat: [] }
-    case 'ADD_KB_CHAT':
-      return { ...state, kbChat: [...state.kbChat, action.payload] }
-    case 'SET_PENDING_QUESTION':
-      return { ...state, pendingQuestion: action.payload }
-    case 'UPDATE_SETTINGS':
-      return { ...state, apiBase: action.payload.apiBase, sessionId: action.payload.sessionId }
-    case 'ADD_PROB_TREND':
-      return { ...state, probTrend: [...state.probTrend, action.payload] }
-    default:
-      return state
+function reducer(s, a) {
+  switch(a.type) {
+    case 'LOGIN':       return { ...s, authenticated: true }
+    case 'LOGOUT':      return { ...init, authenticated: false, theme: s.theme, sessionId: genId() }
+    case 'NAV':         return { ...s, page: a.payload }
+    case 'TOGGLE_THEME':return { ...s, theme: s.theme === 'dark' ? 'light' : 'dark' }
+    case 'PREDICT':     return { ...s, lastApplicant: a.payload.applicant, lastPrediction: a.payload.prediction, decisionChat: [], probTrend: [...s.probTrend, a.payload.prediction.repayment_probability] }
+    case 'ADD_HIST':    return { ...s, history: [a.payload, ...s.history] }
+    case 'CLR_HIST':    return { ...s, history: [] }
+    case 'ADD_DC':      return { ...s, decisionChat: [...s.decisionChat, a.payload] }
+    case 'CLR_DC':      return { ...s, decisionChat: [] }
+    case 'ADD_KB':      return { ...s, kbChat: [...s.kbChat, a.payload] }
+    default: return s
   }
 }
 
-const AppContext = createContext(null)
+const Ctx = createContext(null)
 
 export function AppProvider({ children }) {
-  const [state, dispatch] = useReducer(reducer, initialState)
-  return (
-    <AppContext.Provider value={{ state, dispatch }}>
-      {children}
-    </AppContext.Provider>
-  )
+  const [state, dispatch] = useReducer(reducer, init)
+  // Apply theme to document
+  if (typeof document !== 'undefined') {
+    document.documentElement.setAttribute('data-theme', state.theme)
+  }
+  return <Ctx.Provider value={{ state, dispatch }}>{children}</Ctx.Provider>
 }
 
 export function useApp() {
-  const context = useContext(AppContext)
-  if (!context) throw new Error('useApp must be used within AppProvider')
-  return context
+  const c = useContext(Ctx)
+  if (!c) throw new Error('useApp outside AppProvider')
+  return c
 }

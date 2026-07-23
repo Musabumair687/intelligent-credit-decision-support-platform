@@ -110,3 +110,6 @@ def root():
             "DELETE /api/v1/session/{session_id}",
         ],
     }
+
+# cd M:\Intelligent-Credit-Decision-Support-Platform
+# uvicorn backend.main:app --reload --port 8000

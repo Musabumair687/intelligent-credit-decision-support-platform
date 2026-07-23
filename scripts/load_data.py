@@ -16,7 +16,4 @@ print(f"Rows: {df.shape[0]}")
 print(f"Columns: {df.shape[1]}")
 
 print(df.head())
-print(df.dtypes)
-print(df.columns)
-print(df.isnull().sum())
-print(df["mort_acc"].head())
+
